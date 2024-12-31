@@ -1,9 +1,9 @@
-# quickQrtPCR
+# citationNetwork
 ![Shiny App](https://img.shields.io/badge/Shiny-App-blue)
 
 ## Introduction
 #### What is citationNetwork ?
-quickQrtPCR is a shiny APP which can analyze the citation network and retrieve the reference information.
+CitationNetwork is a shiny APP which can analyze the citation network and retrieve the reference information.
 
 
 
@@ -39,8 +39,8 @@ Refer to the following link to apply for an NCBI API Key, enter the string into 
 ## APP Interface
 Citations page
 
-![Alt1](/image/img1.png)
+![Alt1](/image/img1.jpg)
 
 References page
 
-![Alt2](/image/img2.png)
+![Alt2](/image/img2.jpg)
