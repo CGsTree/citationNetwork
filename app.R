@@ -40,7 +40,7 @@ get_citation_data <- function(pmids, depth = 2, relation_type = "pubmed_pubmed_c
     message(sprintf("Fetching relations for level %d...", level))
     
     for(i in seq_along(current_level_pmids)) {
-      # Sys.sleep(0.1)
+      Sys.sleep(0.1)
       
       tryCatch({
         # 获取关系数据
@@ -492,7 +492,6 @@ process_input <- function(input_str) {
       })
     }
   }
-  
   return(unique(pmids))
 }
 
@@ -626,17 +625,6 @@ ui <- fluidPage(
       helpText(HTML("Although the code does not restrict the network depth and the number of input documents, it is recommended to input <b>1</b> document with a network depth of <b>2</b> layers or less. For example, if each document is cited an average of <b>20</b> times, a network depth of <b>3</b> layers would require retrieving <b>20^3 + 1 = 8001</b> documents, which could cause this application to <b>crash</b>.")),
       width = 3
     ),
-    # mainPanel(
-    #   conditionalPanel(
-    #     condition = "input.citation_network_relation_type != 'references'",
-    #     visNetworkOutput("network_plot", height = "800px")
-    #   ),
-    #   conditionalPanel(
-    #     condition = "input.citation_network_relation_type == 'references'",
-    #     DT::DTOutput("reference_table")
-    #   ),
-    #   width = 9
-    # )
     mainPanel(
       conditionalPanel(
         # 当关系类型不是 references 且不是 pubmed_pubmed 时显示网络图
@@ -657,26 +645,25 @@ ui <- fluidPage(
 # 定义server----
 server <- function(input, output, session) {
   # shinyhelper用
-  observe_helpers(withMathJax = TRUE, help_dir = "./") # help_dir = "./"作为type=markdown时使用，现在用不到
+  observe_helpers(withMathJax = TRUE, help_dir = "./")
   
-  
+  # 示例按钮
   observeEvent(input$citation_network_example, {
-    updateTextAreaInput(session, "citation_network_pmid_input", value = "10.1016/j.celrep.2023.112966")
+    updateTextAreaInput(session, "citation_network_pmid_input", value = "10.1016/j.cub.2023.08.061")
   })
   
+  # 动态深度选择器
   output$citation_network_depth_selector <- renderUI({
-    if (input$citation_network_relation_type == "pubmed_pubmed_citedin") {
+    rel_type <- input$citation_network_relation_type
+    
+    if (rel_type == "pubmed_pubmed_citedin") {
       # 如果选择"Papers citing this (Citations)"，默认为2层
       selectInput("citation_network_citation_depth", 
                   "Network depth:",
-                  choices = list(
-                    "1 layer" = 1,
-                    "2 layers" = 2,
-                    "3 layers" = 3
-                  ),
+                  choices = list("1 layer" = 1, "2 layers" = 2, "3 layers" = 3),
                   selected = 2)
-    } else if (input$citation_network_relation_type == "pubmed_pubmed" | input$citation_network_relation_type == "references") {
-      # 如果选择"Related papers"，只允许选择"1 layer"
+    } else if (rel_type == "pubmed_pubmed" | rel_type == "references") {
+      # 如果选择"Related papers"或"References"，只允许选择"1 layer"
       selectInput("citation_network_citation_depth", 
                   "Network depth:",
                   choices = list("1 layer" = 1),
@@ -685,343 +672,317 @@ server <- function(input, output, session) {
       # 否则允许选择所有深度，默认为1层
       selectInput("citation_network_citation_depth", 
                   "Network depth:",
-                  choices = list(
-                    "1 layer" = 1,
-                    "2 layers" = 2,
-                    "3 layers" = 3
-                  ),
+                  choices = list("1 layer" = 1, "2 layers" = 2, "3 layers" = 3),
                   selected = 1)
     }
   })
   
-  ###############################
-  ######### 返回网络图 ##########
-  ###############################
-  observeEvent(input$citation_network_go, {
-    # 网络渲染
-    if (input$citation_network_relation_type != "references" && input$citation_network_relation_type != 'pubmed_pubmed') {
-      output$network_plot <- renderVisNetwork({
-        req(input$citation_network_pmid_input)
-        
-        isolate({
-          tryCatch({
-            # 处理输入
-            pmids <- process_input(input$citation_network_pmid_input)
-            # if (input$citation_network_relation_type == "pubmed_pubmed") {
-            #   pmids <- pmids[1]
-            # }
-            if (length(pmids) == 0) stop("No valid PMIDs or DOIs found")
-            
-            # 获取关系数据
-            citation_data <- withProgress(
-              message = 'Step 1: Fetching data',
-              value = 0.2,
-              {
-                result <- get_citation_data(
-                  pmids,
-                  depth = as.numeric(input$citation_network_citation_depth),
-                  relation_type = input$citation_network_relation_type
-                )
-                if (nrow(result) == 0) stop("No relations found")
-                incProgress(0.4, detail = paste("Found", nrow(result), "connections"))
-                showNotification(paste("Found", nrow(result), "connections"), type = "message")
-                result
-              }
-            )
-            
-            # 生成网络图
-            withProgress(
-              message = 'Step 2: Creating network visualization',
-              value = 0.6,
-              {
-                result <- generate_plot_from_data(
-                  citation_data,
-                  pmids,
-                  as.numeric(input$degree_threshold),
-                  selected_color = input$citation_network_selected_color,
-                  unselected_color = input$citation_network_unselected_color
-                )
-                if (is.null(result)) stop("Failed to create network visualization")
-                incProgress(1, detail = "Visualization complete")
-                result
-              }
-            )
-          }, error = function(e) {
-            showNotification(
-              paste("Error:", e$message),
-              type = "error",
-              duration = NULL
-            )
-            # 返回错误提示网络图
-            visNetwork(
-              nodes = data.frame(
-                id = 1,
-                label = paste("Error:", e$message),
-                color = "red"
-              ),
-              edges = data.frame(from = integer(0), to = integer(0))
-            ) %>%
-              visLayout(randomSeed = 123)
-          })
-        })
-      })
-    }
-  }, ignoreNULL = TRUE)
   
-  ###############################
-  ##### 返回引用文献表格 ########
-  ###############################
-  observeEvent(input$citation_network_go, {
-
-    # 表格渲染
-    if(length(input$citation_network_relation_type) == 1 && 
-       (input$citation_network_relation_type == "references" || 
-        input$citation_network_relation_type == 'pubmed_pubmed')) {
-      output$reference_table <- DT::renderDT({
-        req(input$citation_network_pmid_input)
-
-        isolate({
-          tryCatch({
-            # Process input to get PMIDs
-            pmids <- process_input(input$citation_network_pmid_input)
-            # 只返回第一篇输入文献的参考文献
-            # 后续代码其实都是多输入情况下可用的，但一篇也能用了
-            pmids <- pmids[1]
-            
-            if(length(pmids) == 0) stop("No valid PMIDs or DOIs found")
-            
-            # Create initial data frame with PMIDs and their DOIs
-            withProgress(
-              message = 'Processing',
-              value = 0,
-              {
-                # Step 1: Get DOIs for input PMIDs (10%)
-                incProgress(0.1, detail = "Getting DOIs for input PMIDs...")
-                input_dois <- sapply(pmids, function(pmid) {
-                  tryCatch({
-                    doi <- get_doi_from_pmid(pmid)
-                    if(is.na(doi)) return("DOI not found")
-                    return(doi)
-                  }, error = function(e) {
-                    return("Error retrieving DOI")
-                  })
-                })
-                
-                # Step 2: Get references for each DOI (20%)
-                incProgress(0.2, detail = "Fetching references for each article...")
-                all_references <- list()
-                total_dois <- length(input_dois)
-                for(i in seq_along(input_dois)) {
-                  incProgress(0.2/total_dois,
-                              detail = sprintf("Processing %d of %d", i, total_dois))
-                  if(input_dois[i] != "DOI not found" && input_dois[i] != "Error retrieving DOI") {
-                    refs <- tryCatch({
-                      # get_references(input_dois[i])
-                      ##add related paper
-                      if (input$citation_network_relation_type == "references") {
-                        get_references(input_dois[i])
-                      } else if (input$citation_network_relation_type == "pubmed_pubmed") {
-                        # 获取citation数据并提取第二列为向量
-                        citation_data <- get_citation_data(pmids, depth=1, relation_type="pubmed_pubmed")
-                        if(is.data.frame(citation_data) && ncol(citation_data) >= 2) {
-                          unlist(citation_data[, 2])  # 将第二列转换为向量
-                        } else {
-                          character(0)  # 如果数据不符合预期，返回空字符向量
-                        }
-                      }
-                      ##
-                    }, error = function(e) {
-                      character(0)
-                    })
-                    all_references[[pmids[i]]] <- refs
+  #########################################
+  ######### 核心数据和网络图生成逻辑 #########
+  #########################################
+  
+  # 使用 eventReactive 来隔离所有对输入的依赖，只在点击按钮时执行
+  citation_network_result <- eventReactive(input$citation_network_go, {
+    
+    # 1. 确保输入框有内容
+    req(input$citation_network_pmid_input) 
+    
+    # 2. 捕获所有当前的输入值（这是 eventReactive 隔离依赖的关键）
+    pmid_input_str <- input$citation_network_pmid_input
+    relation_type_val <- input$citation_network_relation_type
+    
+    # 确保深度选择器已渲染且有值，并转换为数值
+    req(input$citation_network_citation_depth)
+    depth_val <- as.numeric(input$citation_network_citation_depth)
+    
+    threshold_val <- as.numeric(input$degree_threshold)
+    selected_color_val <- input$citation_network_selected_color
+    unselected_color_val <- input$citation_network_unselected_color
+    
+    # 如果关系类型是表格类型，则跳过网络图生成，返回一个特殊的信号或 NULL
+    if (relation_type_val == "references" || relation_type_val == 'pubmed_pubmed') {
+      # 对于表格类型，我们返回一个信号或 NULL，让网络图渲染器知道要跳过
+      return(list(type = "table_mode")) 
+    }
+    
+    # --- 网络图生成逻辑 ---
+    
+    tryCatch({
+      # 处理输入
+      pmids <- process_input(pmid_input_str)
+      if (length(pmids) == 0) stop("No valid PMIDs or DOIs found")
+      
+      # 获取关系数据
+      citation_data <- withProgress(
+        message = 'Step 1: Fetching data',
+        value = 0.2,
+        {
+          result <- get_citation_data(
+            pmids,
+            depth = depth_val,
+            relation_type = relation_type_val
+          )
+          if (nrow(result) == 0) stop("No relations found")
+          incProgress(0.4, detail = paste("Found", nrow(result), "connections"))
+          showNotification(paste("Found", nrow(result), "connections"), type = "message")
+          result
+        }
+      )
+      
+      # 生成网络图
+      network_plot_obj <- withProgress(
+        message = 'Step 2: Creating network visualization',
+        value = 0.6,
+        {
+          result <- generate_plot_from_data(
+            citation_data,
+            pmids,
+            threshold_val,
+            selected_color = selected_color_val,
+            unselected_color = unselected_color_val
+          )
+          if (is.null(result)) stop("Failed to create network visualization")
+          incProgress(1, detail = "Visualization complete")
+          result
+        }
+      )
+      
+      # 返回结果和 PMIDs
+      return(list(type = "network", plot = network_plot_obj))
+      
+    }, error = function(e) {
+      showNotification(
+        paste("Error:", e$message),
+        type = "error",
+        duration = NULL
+      )
+      # 返回错误提示网络图
+      error_plot <- visNetwork(
+        nodes = data.frame(
+          id = 1,
+          label = paste("Error:", e$message),
+          color = "red"
+        ),
+        edges = data.frame(from = integer(0), to = integer(0))
+      ) %>%
+        visLayout(randomSeed = 123)
+      
+      return(list(type = "error", plot = error_plot))
+    })
+  }, ignoreInit = TRUE) # 忽略应用初始加载时的执行
+  
+  # 渲染网络图，它只依赖于 eventReactive 的输出
+  output$network_plot <- renderVisNetwork({
+    res <- citation_network_result()
+    if (is.null(res) || res$type == "table_mode") {
+      # 返回一个空白或提示信息，以防条件面板显示但无结果
+      return(visNetwork(
+        nodes = data.frame(id=1, label="Click 'Generate Network' to start", color="lightgray"), 
+        edges = data.frame()
+      ))
+    }
+    if (res$type == "error") {
+      return(res$plot)
+    }
+    res$plot
+  })
+  
+  
+  #########################################
+  ######### 引用文献表格生成逻辑 ############
+  #########################################
+  
+  # 使用 eventReactive 来隔离表格部分的输入依赖
+  reference_table_result <- eventReactive(input$citation_network_go, {
+    
+    # 1. 确保关系类型是表格类型
+    rel_type <- input$citation_network_relation_type
+    if(rel_type != "references" && rel_type != 'pubmed_pubmed') {
+      return(NULL) # 如果不是表格类型，则返回 NULL，避免执行
+    }
+    
+    req(input$citation_network_pmid_input)
+    
+    # 捕获输入值
+    pmid_input_str <- input$citation_network_pmid_input
+    
+    tryCatch({
+      # Process input to get PMIDs
+      pmids <- process_input(pmid_input_str)
+      # 只处理第一个输入的文献
+      pmids <- pmids[1]
+      
+      if(length(pmids) == 0) stop("No valid PMIDs or DOIs found")
+      
+      # Create initial data frame with PMIDs and their DOIs
+      result_df <- withProgress(
+        message = 'Processing reference data',
+        value = 0,
+        {
+          # ... (这里放您原有的 Step 1 到 Step 4 的所有逻辑) ...
+          
+          # Step 1: Get DOIs for input PMIDs (10%)
+          incProgress(0.1, detail = "Getting DOIs for input PMIDs...")
+          input_dois <- sapply(pmids, function(pmid) {
+            # ... (get_doi_from_pmid 逻辑) ...
+            tryCatch({
+              doi <- get_doi_from_pmid(pmid)
+              if(is.na(doi)) return("DOI not found")
+              return(doi)
+            }, error = function(e) {
+              return("Error retrieving DOI")
+            })
+          })
+          
+          # Step 2: Get references for each DOI (20%)
+          incProgress(0.2, detail = "Fetching references for each article...")
+          all_references <- list()
+          total_dois <- length(input_dois)
+          for(i in seq_along(input_dois)) {
+            incProgress(0.2/total_dois, detail = sprintf("Processing %d of %d", i, total_dois))
+            if(input_dois[i] != "DOI not found" && input_dois[i] != "Error retrieving DOI") {
+              refs <- tryCatch({
+                if (rel_type == "references") {
+                  get_references(input_dois[i])
+                } else if (rel_type == "pubmed_pubmed") {
+                  citation_data <- get_citation_data(pmids, depth=1, relation_type="pubmed_pubmed")
+                  if(is.data.frame(citation_data) && ncol(citation_data) >= 2) {
+                    unlist(citation_data[, 2])
+                  } else {
+                    character(0)
                   }
                 }
+              }, error = function(e) {
+                character(0)
+              })
+              all_references[[pmids[i]]] <- refs
+            }
+          }
+          
+          # Step 3: Create expanded dataframe with all references (50%)
+          reference_rows <- list()
+          total_refs <- sum(sapply(all_references, length))
+          current_ref <- 0
+          
+          for(pmid in names(all_references)) {
+            refs <- all_references[[pmid]]
+            if(length(refs) > 0) {
+              for(ref_id in refs) { # ref_id 可能是 DOI 或 PMID
+                current_ref <- current_ref + 1
+                incProgress(0.5/total_refs, detail = sprintf("Processing details %d of %d", current_ref, total_refs))
                 
-                # Step 3: Create expanded dataframe with all references (50%)
-                reference_rows <- list()
-                total_refs <- sum(sapply(all_references, length))
-                current_ref <- 0
-                
-                for(pmid in names(all_references)) {
-                  refs <- all_references[[pmid]]
-                  if(length(refs) > 0) {
-                    for(ref_doi in refs) {
-                      current_ref <- current_ref + 1
-                      incProgress(0.5/total_refs,
-                                  detail = sprintf("Processing details %d of %d",
-                                                   current_ref, total_refs))
-                      
-
-                      ref_pmid <- if (input$citation_network_relation_type == "pubmed_pubmed") {
-                        ref_doi  # 当关系类型是 pubmed_pubmed 时，直接使用 ref_doi 的值
-                      } else {
-                        tryCatch({
-                          get_pmid_from_doi(ref_doi)  # 其他情况下，通过 DOI 获取 PMID
-                        }, error = function(e) {
-                          NA
-                        })
-                      }
-                      
-                      # 当展示相关文献时，需要获得一次文献doi
-                      related_doi <- if (input$citation_network_relation_type == "pubmed_pubmed") {
-                        tryCatch({
-                          get_doi_from_pmid(ref_doi)
-                        }, error = function(e) {
-                          NA_real_
-                        })
-                      }
-                      
-                      # Get citation count if PMID is available
-                      citation_count <- if(length(ref_pmid) == 1 && !is.na(ref_pmid)) {
-                        tryCatch({
-                          get_citation_count(ref_pmid)
-                        }, error = function(e) {
-                          NA_real_
-                        })
-                      } else {
-                        NA_real_
-                      }
-                      
-                      # Get publication info if PMID is available
-                      pub_info <- if(length(ref_pmid) == 1 && !is.na(ref_pmid)) {
-                        tryCatch({
-                          get_pubmed_info(ref_pmid)
-                        }, error = function(e) {
-                          data.frame(
-                            title = "Not available",
-                            authors = "Not available",
-                            journal = "Not available",
-                            year = "Not available"
-                          )
-                        })
-                      } else {
-                        data.frame(
-                          title = "Not available",
-                          authors = "Not available",
-                          journal = "Not available",
-                          year = "Not available"
-                        )
-                      }
-                      
-                      reference_rows[[length(reference_rows) + 1]] <- if(input$citation_network_relation_type == "references") {
-                        data.frame(
-                          # Input_PMID = pmid,
-                          Input_DOI = input_dois[which(pmids == pmid)],
-                          Output_DOI = ref_doi,
-                          # Reference_PMID = if(!is.na(ref_pmid)) ref_pmid else "Not found",
-                          Title = pub_info$title,
-                          Authors = pub_info$authors,
-                          Journal = pub_info$journal,
-                          Year = pub_info$year,
-                          Citation_Count = citation_count,
-                          stringsAsFactors = FALSE
-                        )
-                      } else if (input$citation_network_relation_type == "pubmed_pubmed") {
-                        data.frame(
-                          # Input_PMID = pmid,
-                          Input_DOI = input_dois[which(pmids == pmid)],
-                          Output_DOI = related_doi,
-                          # Reference_PMID = if(!is.na(ref_pmid)) ref_pmid else "Not found",
-                          Title = pub_info$title,
-                          Authors = pub_info$authors,
-                          Journal = pub_info$journal,
-                          Year = pub_info$year,
-                          Citation_Count = citation_count,
-                          stringsAsFactors = FALSE
-                        )
-                      }
-                      
-                    }
-                  }
-                }
-                
-                if(length(reference_rows) > 0) {
-                  result_df <- do.call(rbind, reference_rows)
-                  
-                  # Simplify authors display - show only first author + et al.
-                  result_df$Authors <- sapply(result_df$Authors, function(authors) {
-                    if(authors != "Not available" && authors != "N/A") {
-                      author_list <- strsplit(authors, "; ")[[1]]
-                      if(length(author_list) > 1) {
-                        paste0(author_list[1], " et al.")
-                      } else {
-                        author_list[1]
-                      }
-                    } else {
-                      authors
-                    }
-                  })
-                  
-                  # Create clickable DOI links for both Input_DOI and Output_DOI
-                  result_df$Input_DOI <- sapply(result_df$Input_DOI, function(doi) {
-                    if(length(doi) == 1 && !is.na(doi) && doi != "Not found" && doi != "DOI not found" && doi != "") {
-                      paste0('<a href="https://doi.org/', doi, '" target="_blank">', doi, '</a>')
-                    } else {
-                      doi
-                    }
-                  })
-                  
-                  result_df$Output_DOI <- sapply(result_df$Output_DOI, function(doi) {
-                    if(doi != "Not found" && doi != "DOI not found" && doi != "") {
-                      paste0('<a href="https://doi.org/', doi, '" target="_blank">', doi, '</a>')
-                    } else {
-                      doi
-                    }
-                  })
-                  
-                  # Sort by Citation_Count in descending order
-                  result_df$Citation_Count <- as.numeric(result_df$Citation_Count)
-                  result_df <- result_df[order(-result_df$Citation_Count, na.last = TRUE), ]
+                ref_pmid <- if (rel_type == "pubmed_pubmed") {
+                  ref_id
                 } else {
-                  result_df <- data.frame(
-                    # Input_PMID = character(0),
-                    Input_DOI = character(0),
-                    Output_DOI = character(0),
-                    # Reference_PMID = character(0),
-                    Title = character(0),
-                    Authors = character(0),
-                    Journal = character(0),
-                    Year = character(0),
-                    Citation_Count = numeric(0),
-                    stringsAsFactors = FALSE
-                  )
+                  tryCatch(get_pmid_from_doi(ref_id), error = function(e) NA_character_)
                 }
                 
-                return(datatable(result_df, rownames = FALSE, escape = FALSE, options = list(
-                  columnDefs = list(
-                    list(width = '2000px', targets = which(names(result_df) == "Title") - 1),
-                    list(width = '300px', targets = which(names(result_df) == "Input_DOI") - 1),
-                    list(width = '100px', targets = which(names(result_df) == "Reference_DOI") - 1),
-                    list(width = '100px', targets = which(names(result_df) == "Reference_PMID") - 1),
-                    list(width = '100px', targets = which(names(result_df) == "Citation_Count") - 1)
-                  ),
-                  order = list(list(ncol(result_df) - 1, 'desc'))
-                )))
+                related_doi <- if (rel_type == "pubmed_pubmed" && !is.na(ref_pmid)) {
+                  tryCatch(get_doi_from_pmid(ref_pmid), error = function(e) NA_character_)
+                } else if (rel_type == "references") {
+                  ref_id
+                } else {
+                  NA_character_
+                }
+                
+                citation_count <- if(length(ref_pmid) == 1 && !is.na(ref_pmid)) {
+                  tryCatch(get_citation_count(ref_pmid), error = function(e) NA_real_)
+                } else {
+                  NA_real_
+                }
+                
+                pub_info <- if(length(ref_pmid) == 1 && !is.na(ref_pmid)) {
+                  tryCatch(get_pubmed_info(ref_pmid), error = function(e) {
+                    data.frame(title = "Not available", authors = "Not available", journal = "Not available", year = "Not available")
+                  })
+                } else {
+                  data.frame(title = "Not available", authors = "Not available", journal = "Not available", year = "Not available")
+                }
+                
+                reference_rows[[length(reference_rows) + 1]] <- data.frame(
+                  Input_DOI = input_dois[which(pmids == pmid)],
+                  Output_DOI = related_doi,
+                  Title = pub_info$title,
+                  Authors = pub_info$authors,
+                  Journal = pub_info$journal,
+                  Year = pub_info$year,
+                  Citation_Count = citation_count,
+                  stringsAsFactors = FALSE
+                )
               }
+            }
+          }
+          
+          if(length(reference_rows) > 0) {
+            result_df <- do.call(rbind, reference_rows)
+            
+            # Step 4: Final cleanup and formatting
+            result_df$Authors <- sapply(result_df$Authors, function(authors) {
+              if (authors == "No authors available" || authors == "Not available") return(authors)
+              author_list <- strsplit(authors, "; ")[[1]]
+              if (length(author_list) > 3) {
+                paste(paste(author_list[1:3], collapse = "; "), "et al.")
+              } else {
+                authors
+              }
+            })
+            
+            # 添加DOI链接
+            result_df$Output_DOI <- ifelse(
+              is.na(result_df$Output_DOI) | result_df$Output_DOI %in% c("NA", "Not found"),
+              result_df$Output_DOI,
+              paste0("<a href='https://doi.org/", result_df$Output_DOI, "' target='_blank'>", result_df$Output_DOI, "</a>")
             )
-          }, error = function(e) {
-            return(data.frame(
-              # Input_PMID = "Error",
-              Input_DOI = as.character(e$message),
-              Output_DOI = "",
-              # Reference_PMID = "",
-              Title = "",
-              Authors = "",
-              Journal = "",
-              Year = "",
-              Citation_Count = NA_real_,
-              stringsAsFactors = FALSE
-            ))
-          })
-        })
-        
-      })
+            
+            # 仅保留所需列
+            result_df <- result_df[, c("Output_DOI", "Title", "Authors", "Journal", "Year", "Citation_Count")]
+            
+            incProgress(1, detail = "Data processing complete")
+            return(result_df)
+            
+          } else {
+            stop("No references or related papers found.")
+          }
+        }
+      )
+    }, error = function(e) {
+      showNotification(paste("Error generating table:", e$message), type = "error", duration = NULL)
+      return(data.frame(
+        Output_DOI = "Error",
+        Title = paste("Error:", e$message),
+        Authors = "", Journal = "", Year = "", Citation_Count = ""
+      ))
+    })
+  }, ignoreInit = TRUE)
+  
+  # 渲染表格，它只依赖于 eventReactive 的输出
+  output$reference_table <- DT::renderDT({
+    # 确保只有在表格模式下且有数据时才显示
+    req(input$citation_network_relation_type == "references" || input$citation_network_relation_type == 'pubmed_pubmed')
+    
+    table_data <- reference_table_result()
+    
+    if (is.null(table_data) || nrow(table_data) == 0) {
+      # 如果没有数据，返回一个空表格或提示
+      return(DT::datatable(
+        data.frame(Output_DOI="No data found", Title="Please check your input or connection.", Authors="", Journal="", Year="", Citation_Count=""),
+        options = list(dom = 't')
+      ))
     }
-  }, ignoreNULL = TRUE)
+    
+    DT::datatable(
+      table_data,
+      options = list(
+        pageLength = 10,
+        columnDefs = list(list(targets = 1, width = '200px')),
+        autoWidth = TRUE
+      ),
+      escape = FALSE, # 允许 HTML 链接渲染
+      rownames = FALSE
+    )
+  }, server = FALSE) # 使用 client-side processing
   
-  
-
 }
-
 # 运行应用
 shinyApp(ui = ui, server = server)
